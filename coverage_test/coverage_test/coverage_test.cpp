@@ -28,10 +28,13 @@
 // 'Debugger' option name for image file execution options key
 #define IFEO_VAL_NAME "Debugger"
 
-#define PARAM_KEY_NAME "SOFTWARE\\coverage_test"
-#define PARAM_VAL_NAME "cmdline"
+#define APPPATH_KEY_NAME "SOFTWARE\\coverage_test"
+#define APPPATH_VAL_NAME "cmdline"
 
-#define IE_TIMEOUT (200 * 1000) // 200 sec
+#define IECFG_KEY_NAME "Software\\Microsoft\\Internet Explorer\\Main"
+#define IECFG_VAL_NAME "TabProcGrowth"
+
+#define TEST_URL L"http://google.com"
 //--------------------------------------------------------------------------------------
 BOOL ExecCmd(DWORD *exitcode, char *cmd)
 {
@@ -81,7 +84,7 @@ BOOL ExecCmd(DWORD *exitcode, char *cmd)
     return ret;
 }
 //--------------------------------------------------------------------------------------
-BOOL IeOpenUrl(PCWSTR lpszUrl)
+BOOL IeOpenUrl(PCWSTR lpszUrl, DWORD dwNum)
 {    
     printf(__FUNCTION__"(): Opening \"%ws\"...\n", lpszUrl);
 
@@ -104,43 +107,43 @@ BOOL IeOpenUrl(PCWSTR lpszUrl)
         BSTR bUrl = SysAllocString(lpszUrl);
         if (bUrl)
         {            
-            
-            // go to our attack our
-            hr = pBrowser->Navigate(bUrl, &vEmpty, &vEmpty, &vEmpty, &vEmpty);
-            if (SUCCEEDED(hr))
+            for (DWORD i = 0; i < dwNum; i++)
             {
-                DWORD dwTime = GetTickCount();
-
-                while (true)
+                // go to the our url
+                hr = pBrowser->Navigate(bUrl, &vEmpty, &vEmpty, &vEmpty, &vEmpty);
+                if (SUCCEEDED(hr))
                 {
-                    VARIANT_BOOL vBusy;
-
-                    // loop untill page not loaded
-                    hr = pBrowser->get_Busy(&vBusy);
-                    if (SUCCEEDED(hr))
+                    while (true)
                     {
-                        if (vBusy == VARIANT_FALSE || GetTickCount() - dwTime > IE_TIMEOUT)
-                        {   
-                            printf(__FUNCTION__"(): DONE\n");
-                            
-                            Sleep(1000);
-                            
+                        VARIANT_BOOL vBusy;
+
+                        // loop untill page not loaded
+                        hr = pBrowser->get_Busy(&vBusy);
+                        if (SUCCEEDED(hr))
+                        {
+                            if (vBusy == VARIANT_FALSE)
+                            {   
+                                printf(__FUNCTION__"(): DONE\n");
+
+                                Sleep(1000);
+
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            printf("pBrowser->get_Busy() ERROR 0x%.8x\n", hr);
                             break;
                         }
-                    }
-                    else
-                    {
-                        printf("pBrowser->get_Busy() ERROR 0x%.8x\n", hr);
-                        break;
-                    }
 
-                    Sleep(100);
-                }                             
-            }
-            else
-            {
-                printf("pBrowser->Navigate() ERROR 0x%.8x\n", hr);
-            }                
+                        Sleep(100);
+                    }                             
+                }
+                else
+                {
+                    printf("pBrowser->Navigate() ERROR 0x%.8x\n", hr);
+                }                
+            }            
 
             SysFreeString(bUrl);
         }    
@@ -210,14 +213,14 @@ BOOL SetOptionalApp(char *lpszValue)
     BOOL bRet = FALSE;
     HKEY hKey;
 
-    LONG Code = RegCreateKey(HKEY_LOCAL_MACHINE, PARAM_KEY_NAME, &hKey);
+    LONG Code = RegCreateKey(HKEY_LOCAL_MACHINE, APPPATH_KEY_NAME, &hKey);
     if (Code == ERROR_SUCCESS)
     {
         if (lpszValue)
         {
             DWORD dwDataSize = lstrlen(lpszValue) + 1;
 
-            Code = RegSetValueEx(hKey, PARAM_VAL_NAME, 0, REG_SZ, (PBYTE)lpszValue, dwDataSize);
+            Code = RegSetValueEx(hKey, APPPATH_VAL_NAME, 0, REG_SZ, (PBYTE)lpszValue, dwDataSize);
             if (Code == ERROR_SUCCESS)
             {
                 // done...
@@ -231,7 +234,7 @@ BOOL SetOptionalApp(char *lpszValue)
         else
         {
             // delete existing value
-            bRet = RegDeleteValue(hKey, PARAM_VAL_NAME);
+            bRet = RegDeleteValue(hKey, APPPATH_VAL_NAME);
         }
 
         RegCloseKey(hKey);
@@ -249,12 +252,12 @@ BOOL GetOptionalApp(char *lpszValue, DWORD dwValueLen)
     BOOL bRet = FALSE;
     HKEY hKey;
 
-    LONG Code = RegCreateKey(HKEY_LOCAL_MACHINE, PARAM_KEY_NAME, &hKey);
+    LONG Code = RegCreateKey(HKEY_LOCAL_MACHINE, APPPATH_KEY_NAME, &hKey);
     if (Code == ERROR_SUCCESS)
     {        
         DWORD dwDataSize = dwValueLen;
 
-        Code = RegQueryValueEx(hKey, PARAM_VAL_NAME, NULL, NULL, (LPBYTE)lpszValue, &dwDataSize);
+        Code = RegQueryValueEx(hKey, APPPATH_VAL_NAME, NULL, NULL, (LPBYTE)lpszValue, &dwDataSize);
         if (Code == ERROR_SUCCESS)
         {
             // done...
@@ -275,6 +278,73 @@ BOOL GetOptionalApp(char *lpszValue, DWORD dwValueLen)
     return bRet;
 }
 //--------------------------------------------------------------------------------------
+BOOL DisableIeMultiprocessMode(void)
+{
+    BOOL bRet = FALSE;
+    HKEY hKey;
+
+    LONG Code = RegCreateKey(HKEY_LOCAL_MACHINE, IECFG_KEY_NAME, &hKey);
+    if (Code == ERROR_SUCCESS)
+    {        
+        DWORD dwTabProcGrowth = 0;
+
+        Code = RegSetValueEx(hKey, IECFG_VAL_NAME, 0, REG_DWORD, (const BYTE *)&dwTabProcGrowth, sizeof(DWORD));
+        if (Code == ERROR_SUCCESS)
+        {
+            // done...
+            bRet = TRUE;
+        }
+        else
+        {
+            printf(__FUNCTION__"() ERROR: RegSetValueEx() fails; Code: %d\n", Code);
+        }       
+
+        RegCloseKey(hKey);
+    }
+    else
+    {
+        printf(__FUNCTION__"() ERROR: RegCreateKey() fails; Code: %d\n", Code);
+    }
+
+    return bRet;
+}
+//--------------------------------------------------------------------------------------
+BOOL EnableIeMultiprocessMode(void)
+{
+    BOOL bRet = FALSE;
+    HKEY hKey;
+
+    LONG Code = RegCreateKey(HKEY_LOCAL_MACHINE, IECFG_KEY_NAME, &hKey);
+    if (Code == ERROR_SUCCESS)
+    {        
+        bRet = RegDeleteValue(hKey, IECFG_VAL_NAME);
+        RegCloseKey(hKey);
+    }
+    else
+    {
+        printf(__FUNCTION__"() ERROR: RegCreateKey() fails; Code: %d\n", Code);
+    }
+
+    return bRet;
+}
+//--------------------------------------------------------------------------------------
+BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) 
+{ 
+    if (fdwCtrlType == CTRL_C_EVENT || 
+        fdwCtrlType == CTRL_CLOSE_EVENT) 
+    { 
+        printf("Terminating program...\n");
+
+        // Handle the CTRL-C signal. 
+        EnableIeMultiprocessMode();
+        SetOptionalApp(NULL);
+
+        ExitProcess(0);
+    } 
+
+    return FALSE;
+}
+//--------------------------------------------------------------------------------------
 int _tmain(int argc, _TCHAR* argv[])
 {
     char *lpszCmdLine = GetCommandLine();
@@ -287,16 +357,28 @@ int _tmain(int argc, _TCHAR* argv[])
         */
         char szSelfPath[MAX_PATH], szExecPath[MAX_PATH];
         GetModuleFileName(GetModuleHandle(NULL), szSelfPath, MAX_PATH);
+        DWORD dwTestIterations = 1;
+
+        SetConsoleCtrlHandler(CtrlHandler, TRUE);
 
         // register current executable as debugger for the IEXPLORE.EXE program
         sprintf_s(szExecPath, "\"%s\" @", szSelfPath);
         SetImageExecutionDebuggerOption("IEXPLORE.EXE", szExecPath);
 
-        if (argc > 1)
+        for (int i = 1; i < argc; i++)
         {
-            // instrumentation program (pin.exe) path has been specified, 
-            // save it into the registry.
-            SetOptionalApp(argv[1]);
+            if (!strcmp(argv[i], "--iterations") && argc > i + 1)
+            {
+                dwTestIterations = atoi(argv[i + 1]);
+                printf("Iterations count: %d\n", dwTestIterations);
+            }
+            else if (!strcmp(argv[i], "--instrumentation-path") && argc > i + 1)
+            {
+                // instrumentation program (pin.exe) path has been specified, 
+                // save it into the registry.
+                SetOptionalApp(argv[i + 1]);
+                printf("Instrumentation tool path: \"%s\"\n", argv[i + 1]);
+            }
         }
 
         // initialize COM
@@ -309,13 +391,17 @@ int _tmain(int argc, _TCHAR* argv[])
 
         DWORD dwTime = GetTickCount();
 
+        // change IE settings to swith it into the single process mode
+        DisableIeMultiprocessMode();
+
         // this function executes Internet Explorer through COM and opens specified URL
-        IeOpenUrl(L"http://ya.ru/");
+        IeOpenUrl(TEST_URL, dwTestIterations);
 
         dwTime = GetTickCount() - dwTime;
 
         printf("Execution time: %d ms\n", dwTime);
 
+        EnableIeMultiprocessMode();
         SetOptionalApp(NULL);
     }
     else

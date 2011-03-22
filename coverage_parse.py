@@ -28,6 +28,8 @@
 
         --modules <module_name> - Print information only for the specified modules.
 
+        --skip-symbols - Don't use PDB loading and parsing for executable modules.
+
     You must specify --dump-blocks or --dump-routines option, but not a both.
 
     Example:
@@ -85,6 +87,7 @@ m_modules_list = {}
 m_logfile = None
 m_sortproc = sortproc_names
 m_modules_to_process = []
+m_skip_symbols = False
 
 def log_write(text):
 
@@ -127,7 +130,7 @@ def read_modules_list(file_name):
 
 def parse_symbol(string):
 
-    global m_modules_list, m_modules_to_process
+    global m_modules_list, m_modules_to_process, m_skip_symbols
 
     # parse 'name+offset' string
     info = string.split("+")
@@ -140,17 +143,32 @@ def parse_symbol(string):
 
             m_modules_list[module_path]['processed_items'] += 1            
 
+        # if end        
+
+        skip_module = False
+
+        if len(m_modules_to_process) > 0:
+
+            skip_module = True
+
+            for module_flt in m_modules_to_process:
+
+                if module_path.find(module_flt) >= 0:
+
+                    # don't skip this module
+                    skip_module = False
+
+                # if end
+            # for end        
         # if end
 
-        for module_flt in m_modules_to_process:            
+        if skip_module:
 
-            if module_path.find(module_flt) == -1:
+            return False
 
-                # this module must be skipped
-                return False
+        if m_skip_symbols:
 
-            # if end
-        # for end        
+            return string
                 
         if m_modules_list.has_key(module_path):
 
@@ -171,6 +189,13 @@ def parse_symbol(string):
             return addr_s
 
         # if end
+
+    elif string[0] == "?" and len(m_modules_to_process) > 0:
+
+        if "?" not in m_modules_to_process:
+
+            return False
+
     # if end
 
     return string
@@ -358,6 +383,10 @@ if __name__ == "__main__":
                 
                 print "[+] Ordering list by number of calls"
                 m_sortproc = sortproc_calls
+
+            elif sys.argv[i] == "--skip-symbols":
+                
+                m_skip_symbols = True
 
             # if end
         # for end
