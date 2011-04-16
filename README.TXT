@@ -7,6 +7,9 @@ Oleksiuk Dmitry, eSage Lab
 mailto:dmitry@esagelab.com
 http://www.esagelab.com/
 
+My article about PIN and this tools:
+http://d-olex.blogspot.com/2011/03/blog-post.html
+(in Russian, use Google Translate)
 
 ==============================================================
   ARCHIVE CONTENTS
