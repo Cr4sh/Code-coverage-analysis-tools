@@ -1,0 +1,21 @@
+OUTNAME = symlib25
+
+ALL: $(OUTNAME).pyd
+
+include buildcfg.inc
+
+CC = cl.exe
+
+CFLAGS = /nologo -I".\src" -I"$(CFG_PYTHON_INC)" -I"$(CFG_MSSDK_INC)" -I"$(SDK_INC_PATH)" -I"$(SDK_INC_PATH)\crt\stl60" -I"$(CFG_DBGSDK_INC)" -I"$(CRT_INC_PATH)" -D_X86_=1 -DWINDOWS -DPYTHON25 /EHs /O1 /c
+
+include makefile.inc
+
+LN = link.exe
+
+LFLAGS = /LIBPATH:"$(CFG_PYTHON_LIB)" /LIBPATH:"$(CFG_DBGSDK_LIB)\i386" /LIBPATH:$(SDK_LIB_PATH)\..\i386 /LIBPATH:$(CRT_LIB_PATH)\..\i386 /OPT:REF /OPT:ICF /INCREMENTAL:NO /DEBUG /DLL /SUBSYSTEM:WINDOWS /DEF:symlib25.def /OUT:..\$(OUTNAME).pyd
+
+$(OUTNAME).pyd: $(LOBJS)
+	$(LN) $(LFLAGS) $(LOBJS) $(LLIBS)
+
+clean:
+	@del *.obj 

@@ -39,6 +39,14 @@ typedef BOOL (WINAPI * SYMLIB_ENUM_HANDLER)(
     PENUM_CONTEXT Context
 );
 
+#ifdef PYTHON25
+#define PYTHON_MODULE_NAME "symlib25"
+#elif PYTHON26
+#define PYTHON_MODULE_NAME "symlib"
+#else
+#error Python version is not specified
+#endif
+
 MODULES_LIST m_ModulesList;
 //--------------------------------------------------------------------------------------
 char *GetNameFromFullPath(const char *lpszPath)
@@ -148,7 +156,7 @@ HMODULE SymlibLoadModule(const char *lpszModuleName)
         }
 
         // load target module
-        HMODULE hModule = LoadLibraryEx(lpszModuleName, NULL, DONT_RESOLVE_DLL_REFERENCES);
+        HMODULE hModule = LoadLibraryEx(lpszModuleName, NULL, 0);
         if (hModule)
         {
 
@@ -162,7 +170,7 @@ HMODULE SymlibLoadModule(const char *lpszModuleName)
 
             // try to load debug symbols for module
             if (SymLoadModuleEx(GetCurrentProcess(), NULL, GetNameFromFullPath(lpszModuleName), NULL, (DWORD64)hModule, 0, NULL, 0))
-            { 
+            {
                 SYMLIB_MODULE_INFO ModuleInfo;
                 ModuleInfo.hModule = hModule;
                 ModuleInfo.ModuleName = ModuleName;
@@ -389,7 +397,7 @@ static PyMethodDef m_Methods[] =
 BOOL SymlibInitialize(void)
 {   
     // initialize python module
-    Py_InitModule("symlib", m_Methods);
+    Py_InitModule(PYTHON_MODULE_NAME, m_Methods);
 
     return TRUE;
 }
@@ -413,6 +421,11 @@ BOOL SymlibUninitialize(void)
 }
 //--------------------------------------------------------------------------------------
 PyMODINIT_FUNC initsymlib(void)
+{
+    SymlibInitialize();
+}
+//--------------------------------------------------------------------------------------
+PyMODINIT_FUNC initsymlib25(void)
 {
     SymlibInitialize();
 }

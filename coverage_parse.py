@@ -46,8 +46,29 @@
 =========================================================================
 '''
 
-import sys, os
-import symlib
+import sys, os, time
+
+ver = sys.version[:3]
+
+# load python specified version of symlib module
+if ver == "2.5":
+
+    from symlib25 import *
+
+elif ver == "2.6":
+
+    from symlib import *
+
+else:
+
+    print "[!] Only Python 2.5 and 2.6 are supported by symlib module"
+
+# if end
+
+APP_NAME = '''
+Code Coverage Analysis Tool for PIN
+by Oleksiuk Dmitry, eSage Lab (dmitry@esagelab.com)
+'''
 
 def sortproc_names(a, b):
 
@@ -115,9 +136,12 @@ def read_modules_list(file_name):
     while content != "":
         
         content = content.replace("\n", "")
+        if content[:1] != "#":
 
-        module_name = os.path.basename(content).lower()
-        m_modules_list[module_name] = { 'path': content, 'processed_items': 0 }
+            module_name = os.path.basename(content).lower()
+            m_modules_list[module_name] = { 'path': content, 'processed_items': 0 }
+
+        # if end
 
         # read the next line
         content = f.readline()        
@@ -177,7 +201,7 @@ def parse_symbol(string):
         # if end
 
         # lookup debug symbol for address
-        symbol = symlib.bestbyaddr(module_path, info[1])
+        symbol = bestbyaddr(module_path, info[1])
         if symbol != None:
 
             addr_s = "%s!%s" % (info[0], symbol[0])
@@ -223,18 +247,19 @@ def print_routines(file_name):
         i = (i + 1) & 3
         
         content = content.replace("\n", "")        
-
         entry = content.split(":") 
-        if len(entry) >= 2:
 
-            entry[1] = int(entry[1])
+        if content[:1] != "#" and len(entry) >= 3:
+
+            rtn_addr = int(entry[0], 16) # routinr virtual address
+            rtn_calls = int(entry[2])
             
             # parse symbol name
-            addr_s = parse_symbol(entry[0])
+            rtn_name = parse_symbol(entry[1])
 
-            if addr_s != False:
+            if rtn_name != False:
 
-                info_list.append({ 'name': addr_s, 'calls': entry[1] })
+                info_list.append({'addr': rtn_addr, 'name': rtn_name, 'calls': rtn_calls })
 
         # if end
 
@@ -282,20 +307,21 @@ def print_blocks(file_name):
         i = (i + 1) & 3
         
         content = content.replace("\n", "")
-
         entry = content.split(":")        
-        if len(entry) >= 3:
+
+        if content[:1] != "#" and len(entry) >= 4:
 
             # parse log entry
-            entry[1] = int(entry[1], 16) # block size
-            entry[2] = int(entry[2]) # calls count
+            bb_addr = int(entry[0], 16) # block virtual address
+            bb_size = int(entry[2], 16) # block size
+            bb_calls = int(entry[3]) # calls count
 
             # parse symbol name
-            addr_s = parse_symbol(entry[0])
+            bb_name = parse_symbol(entry[1])
 
-            if addr_s != False:
+            if bb_name != False:
 
-                info_list.append({ 'name': addr_s, 'calls': entry[2], 'size': entry[1] })            
+                info_list.append({'addr': bb_addr, 'name': bb_name, 'calls': bb_calls, 'size': bb_size })
 
         # if end
 
@@ -323,6 +349,8 @@ def print_blocks(file_name):
 # def end   
 
 if __name__ == "__main__":
+
+    print APP_NAME
 
     if len(sys.argv) < 2:
 

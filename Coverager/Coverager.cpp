@@ -12,7 +12,11 @@
 
     Usage:
 
-        pin.exe -t Coverager.dll -o <log_file_path> -- <some_program>
+        pin.exe -t Coverager.dll -o <log_file_path> [-c] -- <some_program>
+        
+        
+    "-c" option enables call tree log generation, that can be converted in Calltree 
+    Profile Format by coverage_to_callgraph.py program.
 
     Developed by:
 
@@ -27,11 +31,16 @@
 #include <fstream>
 #include <list>
 #include <map>
+#include <stack>
 
 #define MAX_PATH 254
 
 // default output file name
 #define OUT_NAME "coverager.log"
+
+#define APP_NAME                                \
+    "# Code Coverage Analysis Tool for PIN\r\n" \
+    "# by Oleksiuk Dmitry, eSage Lab (dmitry@esagelab.com)\r\n"
 
 /**
  * Command line options
@@ -43,37 +52,58 @@ KNOB<string> KnobOutputFile(
     "specifity trace file name"
 );
 
+KNOB<BOOL> KnobLogCallTree(
+    KNOB_MODE_WRITEONCE, 
+    "pintool", "c", "0", 
+    "Enable call tree logging"
+);
+
 /**
  * Global variables 
  */
+
+typedef struct _CALL_TREE_PARAMS
+{
+    FILE *f;
+    std::stack<ADDRINT> Address;
+
+} CALL_TREE_PARAMS,
+*PCALL_TREE_PARAMS;
 
 // typedefs for STL containers
 typedef std::map<std::pair<ADDRINT, UINT32>, int> BASIC_BLOCKS;
 typedef std::map<string *, std::pair<ADDRINT, ADDRINT>> MODULES_LIST;
 typedef std::map<ADDRINT, int> ROUTINES_LIST;
+typedef std::map<THREADID, CALL_TREE_PARAMS> THREAD_CALLS;
 
 // total number of threads, including main thread
-UINT64 ThreadCount = 0; 
+UINT64 m_ThreadCount = 0; 
 
-// list of the bbl's
-BASIC_BLOCKS BasicBlocks;
+// list of bbl's
+BASIC_BLOCKS m_BasicBlocks;
 
-// list of the executable modules
-MODULES_LIST ModuleList; 
+// list of executable modules
+MODULES_LIST m_ModuleList; 
 
-// list of the routines
-ROUTINES_LIST RoutinesList; 
+// list of routines
+ROUTINES_LIST m_RoutinesList; 
 
-std::list<std::string> ModulePathList;
+// list of call tree logging stuff for each thread
+THREAD_CALLS m_ThreadCalls;
+
+// list of full paths for loaded modules
+std::list<std::string> m_ModulePathList;
+
+// started process information
+std::string m_CommandLine = "";
+INT m_ProcessId = 0;
 //--------------------------------------------------------------------------------------
 /**
  *  Print out help message.
  */
 INT32 Usage(VOID)
 {
-    cerr << 
-        "Code coverage analyzer for PIN Toolkit.\n"
-        "by Oleksiuk Dmytro (dmitry@esagelab.com).\n\n";
+    cerr << APP_NAME;
 
     cerr << KNOB_BASE::StringKnobSummary();
     cerr << endl;
@@ -84,20 +114,48 @@ INT32 Usage(VOID)
 VOID CountBbl(ADDRINT Address, UINT32 NumBytesInBbl, UINT32 NumInstInBbl)
 {
     // save basic block information
-    BasicBlocks[std::make_pair(Address, NumBytesInBbl)] += 1;
+    m_BasicBlocks[std::make_pair(Address, NumBytesInBbl)] += 1;
 }
 //--------------------------------------------------------------------------------------
 // This function is called before every instruction is executed
 VOID CountRoutine(ADDRINT Address)
+{    
+    m_RoutinesList[Address] += 1;
+}
+//--------------------------------------------------------------------------------------
+VOID InstRetHandler(ADDRINT Address)
 {
-    RoutinesList[Address] += 1;
+    // lookup for the current thread info
+    THREADID ThreadIndex = PIN_ThreadId();
+    if (m_ThreadCalls.find(ThreadIndex) != m_ThreadCalls.end())
+    {
+        if (m_ThreadCalls[ThreadIndex].Address.top() != 0)
+        {
+            m_ThreadCalls[ThreadIndex].Address.pop();
+        }
+    }
 }
 //--------------------------------------------------------------------------------------
 VOID InstCallHandler(ADDRINT Address, ADDRINT BranchTargetAddress)
 {
     if (BranchTargetAddress)
     {
-        CountRoutine(BranchTargetAddress);        
+        // log routine information
+        CountRoutine(BranchTargetAddress);      
+
+        // lookup for the current thread info
+        THREADID ThreadIndex = PIN_ThreadId();
+        if (m_ThreadCalls.find(ThreadIndex) != m_ThreadCalls.end())
+        {
+            // log call tree branch
+            fprintf(
+                m_ThreadCalls[ThreadIndex].f, "0x%.8x:0x%.8x\r\n", 
+                m_ThreadCalls[ThreadIndex].Address.top(), BranchTargetAddress
+            );
+
+            // push target routine address to the top of call stack
+            m_ThreadCalls[ThreadIndex].Address.push(BranchTargetAddress);
+        }
     }
 }
 //--------------------------------------------------------------------------------------
@@ -120,6 +178,17 @@ VOID Trace(TRACE TraceInfo, VOID *v)
                     IARG_END
                 );
             }
+
+            // check for the RET
+            if (INS_IsRet(Ins))
+            {
+                INS_InsertCall(
+                    Ins, IPOINT_BEFORE, 
+                    (AFUNPTR)InstRetHandler,
+                    IARG_INST_PTR,
+                    IARG_END
+                );
+            }
         }
 
         // Insert a call to CountBbl() before every basic bloc, passing the number of instructions
@@ -134,9 +203,49 @@ VOID Trace(TRACE TraceInfo, VOID *v)
     }
 }
 //--------------------------------------------------------------------------------------
+VOID PrintLogFileHeader(FILE *f)
+{
+    fprintf(f, "#\r\n");
+    fprintf(f, APP_NAME);
+    fprintf(f, "#\r\n");
+    fprintf(f, "# Program command line: %s\r\n", m_CommandLine.c_str());
+    fprintf(f, "# Process ID: %d\r\n", m_ProcessId);
+    fprintf(f, "#\r\n");
+}
+//--------------------------------------------------------------------------------------
 VOID ThreadStart(THREADID ThreadIndex, CONTEXT *Context, INT32 Flags, VOID *v)
 {
-    ThreadCount += 1;
+    if (KnobLogCallTree.Value())
+    {
+        CALL_TREE_PARAMS Params;
+        char szLogName[MAX_PATH];
+
+        sprintf(szLogName, "%s.%d", KnobOutputFile.Value().c_str(), ThreadIndex);
+
+        // create call tree log file for this thread
+        Params.f = fopen(szLogName, "wb+");
+        if (Params.f)
+        {
+            PrintLogFileHeader(Params.f);
+            fprintf(Params.f, "# Call tree log file for thread %d\r\n#\r\n", ThreadIndex);
+
+            Params.Address.push(0);
+            m_ThreadCalls[ThreadIndex] = Params;
+        }
+    }    
+
+    m_ThreadCount += 1;
+}
+//--------------------------------------------------------------------------------------
+VOID ThreadEnd(THREADID ThreadIndex, const CONTEXT *Context, INT32 Code, VOID *v)
+{
+    THREAD_CALLS::iterator it = m_ThreadCalls.find(ThreadIndex);
+    if (it != m_ThreadCalls.end())
+    {
+        // close call tree log file
+        fclose(it->second.f);
+        m_ThreadCalls.erase(it);
+    }
 }
 //--------------------------------------------------------------------------------------
 // Pin calls this function every time a new rtn is executed
@@ -166,13 +275,13 @@ VOID ImageLoad(IMG Image, VOID *v)
     const string &ImagePath = IMG_Name(Image);
 
     // save full image path for module 
-    ModulePathList.push_back(ImagePath);
+    m_ModulePathList.push_back(ImagePath);
 
     // get image file name from full path
     string *ImageName = NameFromPath(ImagePath);
 
     // add image information into the list
-    ModuleList[ImageName] = std::make_pair(AddrStart, AddrEnd);
+    m_ModuleList[ImageName] = std::make_pair(AddrStart, AddrEnd);
 }
 //--------------------------------------------------------------------------------------
 const string *LookupSymbol(ADDRINT Address)
@@ -181,7 +290,7 @@ const string *LookupSymbol(ADDRINT Address)
     char RetName[MAX_PATH];
 
     // have to do this whole thing because the IMG_* functions don't work here
-    for (MODULES_LIST::iterator it = ModuleList.begin(); it != ModuleList.end(); it++) 
+    for (MODULES_LIST::iterator it = m_ModuleList.begin(); it != m_ModuleList.end(); it++) 
     {
         if ((Address > (*it).second.first) && (Address < (*it).second.second))
         {
@@ -216,17 +325,20 @@ VOID Fini(INT32 ExitCode, VOID *v)
         UINT32 CoverageSize = 0;
 
         // enumerate loged basic blocks
-        for (BASIC_BLOCKS::iterator it = BasicBlocks.begin(); it != BasicBlocks.end(); it++)
+        for (BASIC_BLOCKS::iterator it = m_BasicBlocks.begin(); it != m_BasicBlocks.end(); it++)
         {
             // calculate total coverage size
             CoverageSize += (*it).first.second;
         }
 
+        fprintf(f, APP_NAME);
         fprintf(f, "===============================================\r\n");
-        fprintf(f, "   Number of threads: %d\r\n", ThreadCount);
-        fprintf(f, "   Number of modules: %d\r\n", ModuleList.size());
-        fprintf(f, "  Number of routines: %d\r\n", RoutinesList.size());
-        fprintf(f, "      Number of BBLs: %d\r\n", BasicBlocks.size());
+        fprintf(f, "Program command line: %s\r\n", m_CommandLine.c_str());
+        fprintf(f, "          Process ID: %d\r\n", m_ProcessId);
+        fprintf(f, "   Number of threads: %d\r\n", m_ThreadCount);
+        fprintf(f, "   Number of modules: %d\r\n", m_ModuleList.size());
+        fprintf(f, "  Number of routines: %d\r\n", m_RoutinesList.size());
+        fprintf(f, "      Number of BBLs: %d\r\n", m_BasicBlocks.size());
         fprintf(f, " Total coverage size: %d\r\n", CoverageSize);
         fprintf(f, "===============================================\r\n");        
 
@@ -237,15 +349,18 @@ VOID Fini(INT32 ExitCode, VOID *v)
     f = fopen(LogBlocks.c_str(), "wb+");
     if (f)
     {
+        PrintLogFileHeader(f);
+        fprintf(f, "# Basic blocks log file\r\n#\r\n");
+
         // enumerate loged basic blocks
-        for (BASIC_BLOCKS::iterator it = BasicBlocks.begin(); it != BasicBlocks.end(); it++)
+        for (BASIC_BLOCKS::iterator it = m_BasicBlocks.begin(); it != m_BasicBlocks.end(); it++)
         {
             const string *Symbol = LookupSymbol((*it).first.first);
 
             // dump single basic block information
             fprintf(
-                f, "%s:0x%.8x:%d\r\n", 
-                Symbol->c_str(), (*it).first.second, (*it).second
+                f, "0x%.8x:%s:0x%.8x:%d\r\n", 
+                (*it).first.first, Symbol->c_str(), (*it).first.second, (*it).second
             );
 
             delete Symbol;
@@ -258,13 +373,16 @@ VOID Fini(INT32 ExitCode, VOID *v)
     f = fopen(LogRoutines.c_str(), "wb+");
     if (f)
     {
+        PrintLogFileHeader(f);
+        fprintf(f, "# Routines log file\r\n#\r\n");
+
         // enumerate loged routines
-        for (ROUTINES_LIST::iterator it = RoutinesList.begin(); it != RoutinesList.end(); it++)
+        for (ROUTINES_LIST::iterator it = m_RoutinesList.begin(); it != m_RoutinesList.end(); it++)
         {
             const string *Symbol = LookupSymbol((*it).first);
 
             // dump single routine information
-            fprintf(f, "%s:%d\r\n", Symbol->c_str(), (*it).second);
+            fprintf(f, "0x%.8x:%s:%d\r\n", (*it).first, Symbol->c_str(), (*it).second);
 
             delete Symbol;
         }
@@ -276,8 +394,11 @@ VOID Fini(INT32 ExitCode, VOID *v)
     f = fopen(LogModules.c_str(), "wb+");
     if (f)
     {
+        PrintLogFileHeader(f);
+        fprintf(f, "# Modules log file\r\n#\r\n");
+
         // have to do this whole thing because the IMG_* functions don't work here
-        for (std::list<std::string>::iterator it = ModulePathList.begin(); it != ModulePathList.end(); it++) 
+        for (std::list<std::string>::iterator it = m_ModulePathList.begin(); it != m_ModulePathList.end(); it++) 
         {
             // dump single routine information
             fprintf(f, "%s\r\n", (*it).c_str());            
@@ -291,10 +412,20 @@ int main(int argc, char *argv[])
 {
     // Initialize PIN library. Print help message if -h(elp) is specified
     // in the command line or the command line is invalid 
-    if (PIN_Init(argc,argv))
+    if (PIN_Init(argc, argv))
     {
         return Usage();
     }
+
+    cerr << APP_NAME;
+
+    for (int i = 0; i < argc; i++)
+    {
+        m_CommandLine += argv[i];
+        m_CommandLine += " ";
+    }
+
+    m_ProcessId = PIN_GetPid();
 
     // Initialize symbol table code, needed for rtn instrumentation
     PIN_InitSymbols();
@@ -308,8 +439,9 @@ int main(int argc, char *argv[])
     // Register Routine to be called to instrument rtn
     RTN_AddInstrumentFunction(Routine, 0);
 
-    // Register function to be called for every thread before it starts running
+    // Register functions to be called for every thread starting and termination
     PIN_AddThreadStartFunction(ThreadStart, 0);
+    PIN_AddThreadFiniFunction(ThreadEnd, 0);
 
     // Register function to be called when the application exits
     PIN_AddFiniFunction(Fini, 0);
