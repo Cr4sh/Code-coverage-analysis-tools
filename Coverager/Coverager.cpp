@@ -38,6 +38,9 @@
 // default output file name
 #define OUT_NAME "coverager.log"
 
+// default output directory name
+#define OUT_DIR_NAME "."
+
 #define APP_NAME                                \
     "# Code Coverage Analysis Tool for PIN\r\n" \
     "# by Oleksiuk Dmitry, eSage Lab (dmitry@esagelab.com)\r\n"
@@ -50,6 +53,12 @@ KNOB<string> KnobOutputFile(
     KNOB_MODE_WRITEONCE, 
     "pintool", "o", OUT_NAME, 
     "specifity trace file name"
+);
+
+KNOB<string> KnobOutputDir(
+    KNOB_MODE_WRITEONCE, 
+    "pintool", "d", OUT_DIR_NAME, 
+    "specifity directory name or path to store log files in"
 );
 
 KNOB<BOOL> KnobLogCallTree(
@@ -220,7 +229,11 @@ VOID ThreadStart(THREADID ThreadIndex, CONTEXT *Context, INT32 Flags, VOID *v)
         CALL_TREE_PARAMS Params;
         char szLogName[MAX_PATH];
 
-        sprintf(szLogName, "%s.%d", KnobOutputFile.Value().c_str(), ThreadIndex);
+        std::string LogCommon = KnobOutputDir.Value();
+        LogCommon += "/";        
+        LogCommon += KnobOutputFile.Value();
+
+        sprintf(szLogName, "%s.%d", LogCommon.c_str(), ThreadIndex);
 
         // create call tree log file for this thread
         Params.f = fopen(szLogName, "wb+");
@@ -246,19 +259,6 @@ VOID ThreadEnd(THREADID ThreadIndex, const CONTEXT *Context, INT32 Code, VOID *v
         fclose(it->second.f);
         m_ThreadCalls.erase(it);
     }
-}
-//--------------------------------------------------------------------------------------
-// Pin calls this function every time a new rtn is executed
-VOID Routine(RTN Rtn, VOID *v)
-{
-    RTN_Open(Rtn);
-
-    ADDRINT Address = RTN_Address(Rtn);
-
-    // Insert a call at the entry point of a routine to increment the call count
-    RTN_InsertCall(Rtn, IPOINT_BEFORE, (AFUNPTR)CountRoutine, IARG_ADDRINT, Address, IARG_END);
-    
-    RTN_Close(Rtn);
 }
 //--------------------------------------------------------------------------------------
 string *NameFromPath(const string &Path)
@@ -313,7 +313,10 @@ const string *LookupSymbol(ADDRINT Address)
 //--------------------------------------------------------------------------------------
 VOID Fini(INT32 ExitCode, VOID *v)
 {
-    std::string LogCommon   = KnobOutputFile.Value();
+    std::string LogCommon = KnobOutputDir.Value();
+    LogCommon += "/";        
+    LogCommon += KnobOutputFile.Value();
+
     std::string LogBlocks   = LogCommon + std::string(".blocks");
     std::string LogRoutines = LogCommon + std::string(".routines");
     std::string LogModules  = LogCommon + std::string(".modules");
@@ -427,17 +430,11 @@ int main(int argc, char *argv[])
 
     m_ProcessId = PIN_GetPid();
 
-    // Initialize symbol table code, needed for rtn instrumentation
-    PIN_InitSymbols();
-
     // Register function to be called to instrument traces
     TRACE_AddInstrumentFunction(Trace, 0);
 
     // Register function to be called for every loaded module
     IMG_AddInstrumentFunction(ImageLoad, 0);
-
-    // Register Routine to be called to instrument rtn
-    RTN_AddInstrumentFunction(Routine, 0);
 
     // Register functions to be called for every thread starting and termination
     PIN_AddThreadStartFunction(ThreadStart, 0);
