@@ -136,10 +136,14 @@ def read_modules_list(file_name):
     while content != "":
         
         content = content.replace("\n", "")
-        if content[:1] != "#":
+        entry = content.split(":") 
 
-            module_name = os.path.basename(content).lower()
-            m_modules_list[module_name] = { 'path': content, 'processed_items': 0 }
+        if content[:1] != "#" and len(entry) >= 3:
+
+            module_path = ":".join(entry[2:])
+            module_name = os.path.basename(module_path).lower()
+
+            m_modules_list[module_name] = { 'path': module_path, 'processed_items': 0 }
 
         # if end
 
@@ -297,7 +301,8 @@ def print_blocks(file_name):
     print "[+] Parsing basic blocks list, please wait...\n"    
 
     info_list = []    
-    i = 0
+    instructions = 0
+    i = 0    
 
     # read file contents line by line
     while content != "":
@@ -313,15 +318,17 @@ def print_blocks(file_name):
 
             # parse log entry
             bb_addr = int(entry[0], 16) # block virtual address
-            bb_size = int(entry[2], 16) # block size
-            bb_calls = int(entry[3]) # calls count
+            bb_size = int(entry[1], 16) # block size
+            bb_calls = int(entry[4]) # calls count
+            bb_insts = int(entry[2]) # instructions count
 
             # parse symbol name
-            bb_name = parse_symbol(entry[1])
+            bb_name = parse_symbol(entry[3])
 
             if bb_name != False:
 
-                info_list.append({'addr': bb_addr, 'name': bb_name, 'calls': bb_calls, 'size': bb_size })
+                info_list.append({'addr': bb_addr, 'name': bb_name, 'calls': bb_calls, 'size': bb_size }) 
+                instructions += bb_insts * bb_calls
 
         # if end
 
@@ -343,6 +350,10 @@ def print_blocks(file_name):
         log_write("%15d -- 0x%.8x -- %s" % (entry['calls'], entry['size'], entry['name']))
 
     # for end
+
+    log_write("#")
+    log_write("# %d total instructions executed in given basic blocks" % instructions)
+    log_write("#")
 
     f.close()
 

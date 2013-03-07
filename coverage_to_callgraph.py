@@ -98,12 +98,18 @@ def read_modules_list(file_name):
     while content != "":
         
         content = content.replace("\n", "")
-        if content[:1] != "#":
+        entry = content.split(":") 
+        
+        if len(entry) > 3:
+        
+            entry[2] = entry[2] + ":" + entry[3]
+
+        if content[:1] != "#" and len(entry) >= 3:
 
             alias = len(m_modules_list) + 1
 
-            module_name = os.path.basename(content).lower()
-            m_modules_list[module_name] = { 'path': content, 'processed_items': 0, \
+            module_name = os.path.basename(entry[2]).lower()
+            m_modules_list[module_name] = { 'path': entry[2], 'processed_items': 0, \
                 'symbols_loaded': False, 'alias': alias, 'alias_accessed': False }
 
         # if end

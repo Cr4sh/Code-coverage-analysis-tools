@@ -27,6 +27,7 @@
 =========================================================================
 */
 #include "pin.H"
+#include <time.h>
 #include <iostream>
 #include <fstream>
 #include <list>
@@ -44,6 +45,10 @@
 #define APP_NAME                                \
     "# Code Coverage Analysis Tool for PIN\r\n" \
     "# by Oleksiuk Dmitry, eSage Lab (dmitry@esagelab.com)\r\n"
+
+#define APP_NAME_INI                            \
+    "; Code Coverage Analysis Tool for PIN\r\n" \
+    "; by Oleksiuk Dmitry, eSage Lab (dmitry@esagelab.com)\r\n"
 
 /**
  * Command line options
@@ -79,10 +84,19 @@ typedef struct _CALL_TREE_PARAMS
 } CALL_TREE_PARAMS,
 *PCALL_TREE_PARAMS;
 
+typedef struct _BASIC_BLOCK_PARAMS
+{
+    UINT32 Calls;
+    UINT32 Instructions;
+
+} BASIC_BLOCK_PARAMS,
+*PBASIC_BLOCK_PARAMS;
+
 // typedefs for STL containers
-typedef std::map<std::pair<ADDRINT, UINT32>, int> BASIC_BLOCKS;
-typedef std::map<string *, std::pair<ADDRINT, ADDRINT>> MODULES_LIST;
-typedef std::map<ADDRINT, int> ROUTINES_LIST;
+typedef std::pair<ADDRINT, UINT32> BASIC_BLOCK;
+typedef std::map<BASIC_BLOCK, BASIC_BLOCK_PARAMS> BASIC_BLOCKS;
+typedef std::map<std::string, std::pair<ADDRINT, ADDRINT>> MODULES_LIST;
+typedef std::map<ADDRINT, UINT32> ROUTINES_LIST;
 typedef std::map<THREADID, CALL_TREE_PARAMS> THREAD_CALLS;
 
 // total number of threads, including main thread
@@ -106,6 +120,8 @@ std::list<std::string> m_ModulePathList;
 // started process information
 std::string m_CommandLine = "";
 INT m_ProcessId = 0;
+
+time_t m_StartTime;
 //--------------------------------------------------------------------------------------
 /**
  *  Print out help message.
@@ -120,10 +136,24 @@ INT32 Usage(VOID)
     return -1;
 }
 //--------------------------------------------------------------------------------------
-VOID CountBbl(ADDRINT Address, UINT32 NumBytesInBbl, UINT32 NumInstInBbl)
+VOID CountBbl(ADDRINT Address, UINT32 Size, UINT32 Instructions)
 {
-    // save basic block information
-    m_BasicBlocks[std::make_pair(Address, NumBytesInBbl)] += 1;
+    BASIC_BLOCK Block = std::make_pair(Address, Size);    
+
+    if (m_BasicBlocks.find(Block) == m_BasicBlocks.end())
+    {
+        BASIC_BLOCK_PARAMS Params;
+        Params.Calls = 1;
+        Params.Instructions = Instructions;    
+
+        // allocate a new basic block
+        m_BasicBlocks[Block] = Params;
+    }
+    else
+    {
+        // update basic block information
+        m_BasicBlocks[Block].Calls += 1;
+    }    
 }
 //--------------------------------------------------------------------------------------
 // This function is called before every instruction is executed
@@ -261,10 +291,10 @@ VOID ThreadEnd(THREADID ThreadIndex, const CONTEXT *Context, INT32 Code, VOID *v
     }
 }
 //--------------------------------------------------------------------------------------
-string *NameFromPath(const string &Path)
+std::string NameFromPath(std::string &Path)
 {
     size_t Pos = Path.rfind("\\");
-    return new string(Path.substr(Pos + 1));
+    return std::string(Path.substr(Pos + 1));
 }
 //--------------------------------------------------------------------------------------
 VOID ImageLoad(IMG Image, VOID *v)
@@ -272,13 +302,13 @@ VOID ImageLoad(IMG Image, VOID *v)
     // get image characteristics
     ADDRINT	AddrStart = IMG_LowAddress(Image);
     ADDRINT	AddrEnd = IMG_HighAddress(Image);
-    const string &ImagePath = IMG_Name(Image);
+    std::string ImagePath = std::string(IMG_Name(Image));
 
     // save full image path for module 
     m_ModulePathList.push_back(ImagePath);
 
     // get image file name from full path
-    string *ImageName = NameFromPath(ImagePath);
+    std::string ImageName = NameFromPath(ImagePath);
 
     // add image information into the list
     m_ModuleList[ImageName] = std::make_pair(AddrStart, AddrEnd);
@@ -295,9 +325,9 @@ const string *LookupSymbol(ADDRINT Address)
         if ((Address > (*it).second.first) && (Address < (*it).second.second))
         {
             ADDRINT Offset = Address - (*it).second.first;
-            string *Name = (*it).first;
+            std::string Name = (*it).first;
 
-            sprintf(RetName, "%s+%x", Name->c_str(), Offset);
+            sprintf(RetName, "%s+%x", Name.c_str(), Offset);
             Found = true;
             break;
         }
@@ -334,16 +364,21 @@ VOID Fini(INT32 ExitCode, VOID *v)
             CoverageSize += (*it).first.second;
         }
 
-        fprintf(f, APP_NAME);
-        fprintf(f, "===============================================\r\n");
-        fprintf(f, "Program command line: %s\r\n", m_CommandLine.c_str());
-        fprintf(f, "          Process ID: %d\r\n", m_ProcessId);
-        fprintf(f, "   Number of threads: %d\r\n", m_ThreadCount);
-        fprintf(f, "   Number of modules: %d\r\n", m_ModuleList.size());
-        fprintf(f, "  Number of routines: %d\r\n", m_RoutinesList.size());
-        fprintf(f, "      Number of BBLs: %d\r\n", m_BasicBlocks.size());
-        fprintf(f, " Total coverage size: %d\r\n", CoverageSize);
-        fprintf(f, "===============================================\r\n");        
+        time_t Now;
+        time(&Now); 
+
+        fprintf(f, APP_NAME_INI);
+        fprintf(f, "; =============================================\r\n");
+        fprintf(f, "[coverager]\r\n");
+        fprintf(f, "cmdline = %s ; program command line\r\n", m_CommandLine.c_str());
+        fprintf(f, "pid = %d ; process ID\r\n", m_ProcessId);
+        fprintf(f, "threads = %d ; number of threads\r\n", m_ThreadCount);
+        fprintf(f, "modules = %d ; number of modules\r\n", m_ModuleList.size());
+        fprintf(f, "routines = %d ; number of routines\r\n", m_RoutinesList.size());
+        fprintf(f, "blocks = %d ; number of basic blocks\r\n", m_BasicBlocks.size());
+        fprintf(f, "total_size = %d ; Total coverage size\r\n", CoverageSize);
+        fprintf(f, "time = %d ; Execution time in seconds\r\n", Now - m_StartTime);
+        fprintf(f, "; =============================================\r\n");        
 
         fclose(f);
     }   
@@ -354,6 +389,7 @@ VOID Fini(INT32 ExitCode, VOID *v)
     {
         PrintLogFileHeader(f);
         fprintf(f, "# Basic blocks log file\r\n#\r\n");
+        fprintf(f, "# <address>:<size>:<instructions>:<name>:<calls>\r\n#\r\n");
 
         // enumerate loged basic blocks
         for (BASIC_BLOCKS::iterator it = m_BasicBlocks.begin(); it != m_BasicBlocks.end(); it++)
@@ -362,8 +398,8 @@ VOID Fini(INT32 ExitCode, VOID *v)
 
             // dump single basic block information
             fprintf(
-                f, "0x%.8x:%s:0x%.8x:%d\r\n", 
-                (*it).first.first, Symbol->c_str(), (*it).first.second, (*it).second
+                f, "0x%.8x:0x%.8x:%d:%s:%d\r\n", 
+                (*it).first.first, (*it).first.second, (*it).second.Instructions, Symbol->c_str(), (*it).second.Calls
             );
 
             delete Symbol;
@@ -378,6 +414,7 @@ VOID Fini(INT32 ExitCode, VOID *v)
     {
         PrintLogFileHeader(f);
         fprintf(f, "# Routines log file\r\n#\r\n");
+        fprintf(f, "# <address>:<name>:<calls>\r\n#\r\n");
 
         // enumerate loged routines
         for (ROUTINES_LIST::iterator it = m_RoutinesList.begin(); it != m_RoutinesList.end(); it++)
@@ -399,12 +436,25 @@ VOID Fini(INT32 ExitCode, VOID *v)
     {
         PrintLogFileHeader(f);
         fprintf(f, "# Modules log file\r\n#\r\n");
+        fprintf(f, "# <address>:<size>:<name>\r\n#\r\n");
 
         // have to do this whole thing because the IMG_* functions don't work here
         for (std::list<std::string>::iterator it = m_ModulePathList.begin(); it != m_ModulePathList.end(); it++) 
         {
-            // dump single routine information
-            fprintf(f, "%s\r\n", (*it).c_str());            
+            // get image file name from full path
+            std::string ModuleName = NameFromPath((*it));
+
+            // lookup for module information
+            if (m_ModuleList.find(ModuleName) != m_ModuleList.end())
+            {
+                // dump single routine information
+                fprintf(
+                    f, "0x%.8x:0x%.8x:%s\r\n",
+                    m_ModuleList[ModuleName].first, 
+                    m_ModuleList[ModuleName].second,
+                    (*it).c_str()
+                );            
+            }            
         }
 
         fclose(f);
@@ -412,7 +462,9 @@ VOID Fini(INT32 ExitCode, VOID *v)
 }
 //--------------------------------------------------------------------------------------
 int main(int argc, char *argv[])
-{
+{    
+    time(&m_StartTime); 
+
     // Initialize PIN library. Print help message if -h(elp) is specified
     // in the command line or the command line is invalid 
     if (PIN_Init(argc, argv))

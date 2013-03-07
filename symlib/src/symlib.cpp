@@ -205,6 +205,7 @@ HMODULE SymlibLoadModule(const char *lpszModuleName)
         else
         {
             DbgMsg(__FILE__, __LINE__, "LoadLibraryEx() ERROR 0x%.8x\n", GetLastError());
+            DbgMsg(__FILE__, __LINE__, "Error while loading \"%s\"\n", lpszModuleName);
         }
     }
     catch (...)
@@ -443,7 +444,7 @@ BOOL APIENTRY DllMain(
 
         char szSymbolsPath[MAX_PATH], szSymbolsDir[MAX_PATH];
         GetCurrentDirectory(MAX_PATH - 1, szSymbolsDir);
-        strcat(szSymbolsDir, "\\Symbols");
+        strcat(szSymbolsDir, "\\symbols");
 
         // create directory for debug symbols
         CreateDirectory(szSymbolsDir, NULL);
@@ -451,7 +452,7 @@ BOOL APIENTRY DllMain(
         sprintf(
             szSymbolsPath, 
             "%s;SRV*%s*http://msdl.microsoft.com/download/symbols", 
-            szSymbolsDir, szSymbolsDir
+            szSymbolsDir, szSymbolsDir, szSymbolsDir
         );
 
         // set symbol path and initialize symbol server client

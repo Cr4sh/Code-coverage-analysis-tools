@@ -2,9 +2,9 @@
 <VisualStudioProject
 	ProjectType="Visual C++"
 	Version="9,00"
-	Name="Coverager"
+	Name="coverager"
 	ProjectGUID="{639EF517-FCFC-408E-9500-71F0DC0458DB}"
-	RootNamespace="Coverager"
+	RootNamespace="coverager"
 	Keyword="Win32Proj"
 	TargetFrameworkVersion="131072"
 	>
@@ -76,7 +76,7 @@
 				UseUnicodeResponseFiles="false"
 				AdditionalOptions="/export:main"
 				AdditionalDependencies="pin.lib libxed.lib libcpmt.lib libcmt.lib pinvm.lib kernel32.lib ntdll-32.lib $(NOINHERIT)"
-				OutputFile="$(OutDir)\..\..\Coverager.dll"
+				OutputFile="$(OutDir)\..\..\coverager.dll"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="..\ia32\lib;..\ia32\lib-ext;..\extras\xed2-ia32\lib"
 				GenerateManifest="false"
@@ -412,7 +412,7 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
-				RelativePath=".\Coverager.cpp"
+				RelativePath=".\coverager.cpp"
 				>
 			</File>
 		</Filter>

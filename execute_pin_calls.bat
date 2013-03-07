@@ -1,10 +1,12 @@
 @echo off
 
 :: delete old files
-if exist .\Logs rmdir .\Logs /S /Q
-mkdir .\Logs
+if exist .\logs rmdir .\logs /S /Q
+mkdir .\logs
 
-set PINPATH="E:\pin-2.8-37300-msvc9-ia32_intel64-windows"
+set PINPATH="D:\pin-2.12-56759-msvc9-windows"
+
+if exist .\coverager.dll copy .\coverager.dll %PINPATH%\coverager.dll
 
 :: start pin
-"%PINPATH%\ia32\bin\pin.exe" -t "%PINPATH%\Coverager.dll" -d .\Logs -c -- %*
+"%PINPATH%\ia32\bin\pin.exe" -t "%PINPATH%\coverager.dll" -d .\logs -c -- %*
